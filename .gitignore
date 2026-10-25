@@ -1,0 +1,12 @@
+﻿# Never commit secrets or raw logs
+*.log
+*.evtx
+*.pcap
+*.token
+*.pem
+*.key
+.env
+# Local noise
+Thumbs.db
+desktop.ini
+*.tmp

@@ -1,0 +1,28 @@
+﻿# ===== 1. Correlation search (saved in Splunk as a Report) =====
+# Same user: >=5 failed logons, THEN a successful logon, THEN Sysmon activity within 15 min.
+index=sysmon_lab (sourcetype=winsec_export OR sourcetype=sysmon_kv)
+| eval user=case(sourcetype=="winsec_export", lower(TargetUserName), sourcetype=="sysmon_kv", lower(mvindex(split(User,"\\"),-1)))
+| where isnotnull(user) AND user!="" AND user!="system" AND EventID!=4720
+| eval fail_time=if(EventID==4625,_time,null()), success_time=if(EventID==4624,_time,null()), sysmon_time=if(sourcetype=="sysmon_kv",_time,null())
+| stats min(fail_time) AS first_fail, max(fail_time) AS last_fail, min(success_time) AS first_success, min(sysmon_time) AS first_sysmon, count(fail_time) AS failed_logons, count(success_time) AS successful_logons, count(sysmon_time) AS sysmon_events, values(RuleName) AS rules_fired by user
+| where failed_logons>=5 AND successful_logons>=1 AND sysmon_events>=1 AND first_success>last_fail AND first_sysmon>=first_success AND (first_sysmon-last_fail)<=900
+| eval minutes_fail_to_activity=round((first_sysmon-last_fail)/60,1)
+| convert ctime(first_fail) ctime(last_fail) ctime(first_success) ctime(first_sysmon)
+
+# ===== 2. Attack timeline for one user (both sources, in order) =====
+index=sysmon_lab (sourcetype=winsec_export OR sourcetype=sysmon_kv)
+| eval user=case(sourcetype=="winsec_export", lower(TargetUserName), sourcetype=="sysmon_kv", lower(mvindex(split(User,"\\"),-1)))
+| where user="labuser"
+| sort _time
+| table _time, sourcetype, EventID, RuleName, Image, ParentImage, CommandLine, TargetObject, QueryName, LogonType, Status
+
+# ===== 3. Timestamp / ingest-lag check (used to find the TZ bug) =====
+index=sysmon_lab sourcetype=winsec_export
+| eval lag_min=round((_indextime-_time)/60,1)
+| table _time, lag_min, EventID, TargetUserName
+| sort _time
+
+# ===== 4. Duplicate check (should return no rows) =====
+index=sysmon_lab sourcetype=sysmon_kv
+| stats count by RecordId
+| where count>1

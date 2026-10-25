@@ -1,0 +1,89 @@
+﻿# Sigma correlation (temporal_ordered). Written to document the detection logic
+# in a vendor-neutral way. It has NOT been compiled or tested with a backend:
+# the working, verified implementation is the SPL in correlation-searches.spl.
+# Note: group-by needs one shared field name. In the SPL that is the normalized
+# "user" (Security TargetUserName / Sysmon User after the backslash).
+title: Failed Logon
+name: failed_logon
+status: experimental
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID: 4625
+    condition: selection
+level: low
+---
+title: Burst of Failed Logons
+name: failed_logon_burst
+status: experimental
+correlation:
+    type: event_count
+    rules:
+        - failed_logon
+    group-by:
+        - TargetUserName
+    timespan: 5m
+    condition:
+        gte: 5
+level: medium
+---
+title: Successful Logon
+name: successful_logon
+status: experimental
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID: 4624
+        LogonType:
+            - 2
+            - 3
+            - 10
+    condition: selection
+level: informational
+---
+title: Suspicious PowerShell Process Creation
+name: suspicious_powershell
+status: experimental
+logsource:
+    product: windows
+    category: process_creation
+detection:
+    office_parent:
+        ParentImage|endswith: '\winword.exe'
+        Image|endswith: '\powershell.exe'
+    encoded_hidden:
+        CommandLine|contains:
+            - " -enc "
+            - " -w hidden"
+            - " -ep bypass"
+    condition: office_parent or encoded_hidden
+level: high
+---
+title: Brute Force Followed by Logon and Suspicious Execution
+id: 8b3c1c5e-6f0a-4f6e-9d57-2a1d7c4b9e10
+status: experimental
+description: Same account shows 5+ failed logons, then a successful logon, then suspicious process activity within 15 minutes.
+author: Katreddy Gowtham Kumar Reddy
+tags:
+    - attack.credential-access
+    - attack.t1110
+    - attack.initial-access
+    - attack.t1078
+    - attack.execution
+    - attack.t1059.001
+correlation:
+    type: temporal_ordered
+    rules:
+        - failed_logon_burst
+        - successful_logon
+        - suspicious_powershell
+    group-by:
+        - user
+    timespan: 15m
+falsepositives:
+    - Admin who mistypes a password, then runs an encoded PowerShell script
+level: high
